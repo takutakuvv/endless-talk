@@ -2,6 +2,9 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
+  verification: {
+    google: '8rdv6-oBxoLXhDcxQa41xRmsPNIYtLRMosa_A3xjWdY',
+  },
   title: 'EndlessTalk',
   description: '会話の沈黙を防ぐAIアシストアプリ。会話を自動で聞き取り、次に聞ける質問や広げられる話題をリアルタイムで提案します。デート・初対面・職場・飲み会の4つのシーンから選択し、その場面に合った最適なアシストを行います。',
 }
