@@ -1,65 +1,393 @@
-import Image from "next/image";
+'use client'
+
+import { useState, useEffect, useRef, useCallback } from 'react'
+
+interface Suggestions {
+  questions: string[]
+  topics: string[]
+}
+
+interface Profile {
+  name: string
+  hobbies: string
+  from: string
+  memo: string
+}
+
+type Mode = 'date' | 'firstMeet' | 'work' | 'party'
+
+const MODES: { id: Mode; label: string; emoji: string; desc: string }[] = [
+  { id: 'date', label: '気になる人', emoji: '🍀', desc: '片思い〜交際中' },
+  { id: 'firstMeet', label: '初対面', emoji: '🤝', desc: '初めて会う相手' },
+  { id: 'work', label: '仕事・職場', emoji: '💼', desc: '同僚・上司' },
+  { id: 'party', label: '飲み会・複数人', emoji: '🍻', desc: 'グループでの会話' },
+]
 
 export default function Home() {
+  const [mode, setMode] = useState<Mode>('date')
+  const [listening, setListening] = useState(false)
+  const [transcript, setTranscript] = useState('')
+  const [suggestions, setSuggestions] = useState<Suggestions | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [supported, setSupported] = useState(true)
+  const [showProfile, setShowProfile] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
+  const [profile, setProfile] = useState<Profile>({ name: '', hobbies: '', from: '', memo: '' })
+  const [profileDraft, setProfileDraft] = useState<Profile>({ name: '', hobbies: '', from: '', memo: '' })
+
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const transcriptRef = useRef('')
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SR = window.SpeechRecognition || (window as Window & { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition
+      if (!SR) setSupported(false)
+    }
+  }, [])
+
+  const fetchSuggestions = useCallback(async (text: string) => {
+    if (!text.trim() || text.trim().length < 10) return
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: text, mode, profile }),
+      })
+      const data = await res.json()
+      if (data.questions) setSuggestions(data)
+      else setError(data.error ?? 'エラーが発生しました')
+    } catch {
+      setError('通信エラーが発生しました')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const startListening = useCallback(async () => {
+    const SR = window.SpeechRecognition || (window as Window & { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition
+    if (!SR) return
+
+    // スリープ防止
+    try {
+      wakeLockRef.current = await navigator.wakeLock?.request('screen')
+    } catch { /* 非対応端末は無視 */ }
+
+    const recognition = new SR()
+    recognition.lang = 'ja-JP'
+    recognition.continuous = true
+    recognition.interimResults = true
+
+    recognition.onresult = (e: SpeechRecognitionEvent) => {
+      let interim = ''
+      let final = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript
+        if (e.results[i].isFinal) final += t
+        else interim += t
+      }
+      if (final) {
+        transcriptRef.current += final + '。'
+        setTranscript(transcriptRef.current)
+        // 3秒の沈黙後に提案を更新
+        if (debounceRef.current) clearTimeout(debounceRef.current)
+        debounceRef.current = setTimeout(() => fetchSuggestions(transcriptRef.current), 3000)
+      }
+    }
+
+    recognition.onerror = () => setListening(false)
+    recognition.onend = () => {
+      // 継続的に再起動（Chromeは自動停止するため）
+      if (recognitionRef.current) {
+        try { recognition.start() } catch { /* 無視 */ }
+      }
+    }
+
+    recognitionRef.current = recognition
+    recognition.start()
+    setListening(true)
+  }, [fetchSuggestions])
+
+  const stopListening = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null
+      recognitionRef.current.stop()
+      recognitionRef.current = null
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    wakeLockRef.current?.release()
+    wakeLockRef.current = null
+    setListening(false)
+  }, [])
+
+  const handleReset = () => {
+    stopListening()
+    setTranscript('')
+    transcriptRef.current = ''
+    setSuggestions(null)
+    setError('')
+  }
+
+  if (!supported) {
+    return (
+      <div className="h-full flex items-center justify-center px-6 text-center">
+        <div>
+          <p className="text-4xl mb-4">😢</p>
+          <p className="text-white text-lg font-bold mb-2">お使いのブラウザは非対応です</p>
+          <p className="text-gray-400 text-sm">Chrome または Edge をお使いください</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="h-full flex flex-col bg-gray-950 text-white sm:items-center sm:justify-center">
+    <div className="w-full h-full flex flex-col sm:max-w-sm sm:h-[85vh] sm:rounded-3xl sm:overflow-hidden sm:shadow-2xl sm:border sm:border-gray-800">
+      {/* ヘッダー */}
+      <header className="flex-shrink-0 px-5 pt-5 pb-3 space-y-2">
+        {/* 1行目: タイトル + 使い方・リセット */}
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold text-indigo-400 tracking-tight">EndlessTalk</h1>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowHelp(true)}
+              className="text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition-colors"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+              使い方
+            </button>
+            <button
+              onClick={handleReset}
+              className="text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition-colors"
             >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              リセット
+            </button>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+        {/* 2行目: モードバッジ + 👤 */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-300">
+            {transcript
+              ? <span className="bg-indigo-900 text-indigo-300 px-2.5 py-1 rounded-full">{MODES.find(m => m.id === mode)?.emoji} {MODES.find(m => m.id === mode)?.label}</span>
+              : '沈黙をなくす会話アシストAI'
+            }
+          </span>
+          <button
+            onClick={() => { setProfileDraft(profile); setShowProfile(true) }}
+            className={`relative w-7 h-7 flex items-center justify-center rounded-lg text-sm transition-colors ${
+              Object.values(profile).some(v => v)
+                ? 'bg-indigo-700 text-white'
+                : 'bg-gray-800 hover:bg-gray-700 text-gray-400'
+            }`}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            👤
+            {Object.values(profile).some(v => v) && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-400 rounded-full" />
+            )}
+          </button>
         </div>
-      </main>
+      </header>
+
+      {/* メインコンテンツ */}
+      <div className="flex-1 overflow-y-auto px-5 pb-5 flex flex-col gap-4">
+
+        {/* 認識テキスト */}
+        {transcript && (
+          <div className="bg-gray-900 rounded-2xl p-4">
+            <p className="text-xs text-gray-500 mb-2">🎤 聞き取り中の会話</p>
+            <p className="text-gray-300 text-sm leading-relaxed line-clamp-4">{transcript}</p>
+          </div>
+        )}
+
+        {/* ローディング */}
+        {loading && (
+          <div className="flex items-center gap-3 px-2">
+            <div className="flex gap-1">
+              {[0, 1, 2].map(i => (
+                <div key={i} className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+              ))}
+            </div>
+            <p className="text-gray-400 text-sm">AIが考えています...</p>
+          </div>
+        )}
+
+        {/* エラー */}
+        {error && <p className="text-red-400 text-sm px-2">{error}</p>}
+
+        {/* 提案 */}
+        {suggestions && !loading && (
+          <>
+            <div>
+              <div className="flex items-center justify-between px-1 mb-3">
+                <p className="text-xs text-gray-500">💬 次に聞けること</p>
+                <button
+                  onClick={() => fetchSuggestions(transcriptRef.current)}
+                  disabled={!transcript}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-950 hover:bg-indigo-900 px-3 py-1 rounded-full transition-colors disabled:opacity-40"
+                >
+                  🔄 今すぐ更新
+                </button>
+              </div>
+              <div className="flex flex-col gap-2">
+                {suggestions.questions.map((q, i) => (
+                  <div key={i} className="bg-indigo-950 border border-indigo-800 rounded-2xl px-4 py-4">
+                    <p className="text-indigo-100 font-medium leading-snug text-lg">{q}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs text-gray-500 mb-3 px-1">🔗 広げられる話題</p>
+              <div className="flex gap-2 flex-wrap">
+                {suggestions.topics.map((t, i) => (
+                  <span key={i} className="bg-gray-800 text-gray-200 font-medium px-4 py-2 rounded-full text-base">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* 初期状態 */}
+        {!suggestions && !loading && !transcript && (
+          <div className="flex-1 flex flex-col gap-5 py-4">
+            {/* モード選択 */}
+            <div>
+              <p className="text-sm text-gray-300 font-medium mb-3 px-1">会話のシーンを選ぶ</p>
+              <div className="grid grid-cols-2 gap-2">
+                {MODES.map(m => (
+                  <button
+                    key={m.id}
+                    onClick={() => setMode(m.id)}
+                    className={`flex flex-col items-center justify-center py-4 px-3 rounded-2xl border-2 transition-all ${
+                      mode === m.id
+                        ? 'border-indigo-500 bg-indigo-950 text-white'
+                        : 'border-gray-800 bg-gray-900 text-gray-400 hover:border-gray-600'
+                    }`}
+                  >
+                    <span className="text-3xl mb-1">{m.emoji}</span>
+                    <span className="font-bold text-sm">{m.label}</span>
+                    <span className="text-xs mt-0.5 opacity-60">{m.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        )}
+      </div>
+
+      {/* マイクボタン */}
+      <div className="flex-shrink-0 px-5 pb-8 pt-3 flex flex-col items-center gap-2">
+        {listening && (
+          <p className="text-xs text-indigo-400 animate-pulse">● 聞き取り中 — 会話が止まると自動で提案します</p>
+        )}
+        <button
+          onClick={listening ? stopListening : startListening}
+          className={`w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-lg ${
+            listening
+              ? 'bg-red-500 hover:bg-red-600 shadow-red-900'
+              : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-900'
+          }`}
+        >
+          {listening ? (
+            <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
+              <rect x="6" y="6" width="12" height="12" rx="2"/>
+            </svg>
+          ) : (
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/>
+            </svg>
+          )}
+        </button>
+      </div>
+      {/* 使い方モーダル */}
+      {showHelp && (
+        <div className="absolute inset-0 bg-black/60 z-50 flex items-end">
+          <div className="bg-gray-900 w-full rounded-t-3xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-white">使い方</h2>
+              <button onClick={() => setShowHelp(false)} className="text-gray-400 hover:text-white text-xl leading-none">✕</button>
+            </div>
+            <ol className="space-y-4">
+              {[
+                { step: '①', title: 'シーンを選ぶ', desc: 'デート・初対面・仕事・飲み会など、会話の状況に合ったシーンを選んでください。' },
+                { step: '②', title: 'マイクをタップして会話を始める', desc: '会話を認識すると、3秒の沈黙後に自動で提案が表示されます。' },
+                { step: '③', title: '提案をチラ見する', desc: '次に聞けること・広げられる話題をさりげなく参考にしてください。' },
+              ].map(({ step, title, desc }) => (
+                <li key={step} className="flex gap-3">
+                  <span className="text-indigo-400 font-bold text-sm w-5 shrink-0">{step}</span>
+                  <div>
+                    <p className="text-white text-sm font-medium">{title}</p>
+                    <p className="text-gray-400 text-xs mt-0.5 leading-relaxed">{desc}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <div className="bg-gray-800 rounded-2xl p-3">
+              <p className="text-xs text-gray-400 leading-relaxed">💡 👤 ボタンで相手のプロフィールを入力すると、より具体的な提案が届きます。</p>
+            </div>
+            <button
+              onClick={() => setShowHelp(false)}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold transition-colors"
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* プロフィールメモモーダル */}
+      {showProfile && (
+        <div className="absolute inset-0 bg-black/60 z-50 flex items-end">
+          <div className="bg-gray-900 w-full rounded-t-3xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-white">相手のプロフィールメモ</h2>
+              <button onClick={() => setShowProfile(false)} className="text-gray-400 hover:text-white text-xl leading-none">✕</button>
+            </div>
+            <p className="text-xs text-gray-500">入力した情報をもとに、より自然な質問を提案します（任意）</p>
+            <div className="space-y-3">
+              {[
+                { key: 'name', label: 'ニックネーム', placeholder: '例：田中さん' },
+                { key: 'hobbies', label: '趣味・好きなこと', placeholder: '例：映画鑑賞、カフェ巡り' },
+                { key: 'from', label: '出身・住んでいる場所', placeholder: '例：大阪出身、今は東京' },
+                { key: 'memo', label: 'その他メモ', placeholder: '例：犬を飼っている、料理が得意' },
+              ].map(({ key, label, placeholder }) => (
+                <div key={key}>
+                  <label className="text-xs text-gray-400 mb-1 block">{label}</label>
+                  <input
+                    type="text"
+                    value={profileDraft[key as keyof Profile]}
+                    onChange={e => setProfileDraft(prev => ({ ...prev, [key]: e.target.value }))}
+                    placeholder={placeholder}
+                    className="w-full bg-gray-800 text-white placeholder-gray-600 text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => { setProfile({ name: '', hobbies: '', from: '', memo: '' }); setShowProfile(false) }}
+                className="flex-1 py-2.5 border border-gray-700 text-gray-400 rounded-xl text-sm font-medium"
+              >
+                クリア
+              </button>
+              <button
+                onClick={() => { setProfile(profileDraft); setShowProfile(false) }}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold transition-colors"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  );
+    </div>
+  )
 }
