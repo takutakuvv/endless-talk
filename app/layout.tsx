@@ -7,6 +7,14 @@ export const metadata: Metadata = {
   },
   title: 'EndlessTalk',
   description: '会話の沈黙を防ぐAIアシストアプリ。会話を自動で聞き取り、次に聞ける質問や広げられる話題をリアルタイムで提案します。デート・初対面・職場・飲み会の4つのシーンから選択し、その場面に合った最適なアシストを行います。',
+  openGraph: {
+    title: 'EndlessTalk｜沈黙をなくす会話アシストAI',
+    description: '会話の沈黙を防ぐ会話アシストAI。会話を自動で聞き取り、次に聞くと効果的な質問や広げられる話題をAIがリアルタイムで提案してくれるアプリ。',
+    url: 'https://endless-talk.vercel.app',
+    siteName: 'EndlessTalk',
+    locale: 'ja_JP',
+    type: 'website',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
