@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'EndlessTalk｜沈黙をなくす会話アシストAI',
     description: '会話の沈黙を防ぐ会話アシストAI。会話を自動で聞き取り、次に聞くと効果的な質問や広げられる話題をAIがリアルタイムで提案してくれるアプリ。',
-    url: 'https://endless-talk.vercel.app',
+    url: 'https://www.endless-talk.com',
     siteName: 'EndlessTalk',
     locale: 'ja_JP',
     type: 'website',
